@@ -13,7 +13,7 @@ from matplotlib import pyplot as plt
 from abs_sleep import AbsSleep
 
 from music import *
-from disklavier import DISKLAVIER, findDevice
+from disklavier import DISKLAVIER, Disklavier
 
 TIME_SUSTAIN = 0.7
 TIME_REST = 0.3
@@ -33,9 +33,7 @@ LOG_FILE = './log.json'
 RECORD_FILE = './piano_measure.wav'
 
 def playPiano(absSleep: AbsSleep):
-    outs = mido.get_output_names()  # type: ignore
-    device = findDevice(outs)
-    with mido.open_output(device) as port:  # type: ignore
+    with Disklavier() as port:
         with open(LOG_FILE, 'w') as f:
             while True:
                 try:
@@ -151,7 +149,7 @@ if __name__ == '__main__':
     print('unit duration (sec):', (
         TIME_SUSTAIN + TIME_REST
     ) * len(VELOCITIES) + TIME_MUTE)
-    
+
     takeData()
     analyze()
     eyeballResults()
