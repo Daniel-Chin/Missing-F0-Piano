@@ -1,0 +1,4 @@
+- Clone and add https://github.com/daniel-Chin/python_lib to $PYTHONPATH  
+- tqdm
+- pytorch
+- matplotlib
