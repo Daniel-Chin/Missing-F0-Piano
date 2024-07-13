@@ -1,6 +1,6 @@
-import typing as tp
 from functools import lru_cache
 from itertools import count
+import sys
 
 import torch
 from torch import Tensor
@@ -39,6 +39,7 @@ def solve(
     forgive_strangers: float = DEFAULT_FORGIVE_STRANGERS, 
     lr: float = DEFAULT_LR,
     tune_lr: bool = TUNE_LR, 
+    verbose: bool = False,
 ):
     '''
     `perception_tolerance`: in semitones.  
@@ -130,7 +131,10 @@ def solve(
 
         def train(self):
             flat_combo = 0
-            for epoch in tqdm(count()):
+            counter = count()
+            if verbose:
+                counter = tqdm(counter)
+            for epoch in counter:
                 loss, grad, produced = self.oneEpoch()
                 if grad is not None and grad.abs().max() < 0.005:
                     flat_combo += 1
@@ -138,7 +142,8 @@ def solve(
                     flat_combo = 0
                 if flat_combo > 10:
                     break
-            print('converged at epoch', epoch)
+            if verbose:
+                print('converged at epoch', epoch)
             powers = self.activations.square()
             assert (powers < 1.0).all()
             return loss, produced
@@ -157,14 +162,16 @@ def solve(
             plt.plot(losses, label=label, c=c)
         plt.legend()
         plt.show()
-        return None, None
+        sys.exit(0)
 
     candidates = [Trainee(lr)]
     while True:
         losses = torch.tensor([x.train()[0] for x in candidates])
-        winner_i = losses.argmin()
-        winner: Trainee = candidates[winner_i]
-        print('locked', 'down' if winner_i == 0 else 'up')
+        winner_i: int = losses.argmin().item()  # type: ignore
+        winner = candidates[winner_i]
+        assert isinstance(winner, Trainee)  # dumb type checker doesn't take the LFS...
+        if verbose:
+            print('locked', 'down' if winner_i == 0 else 'up')
         with torch.no_grad():
             powers = winner.activations.square()
             unlocked = powers + (1.0 - winner.lock_mask) * 69.0
@@ -187,9 +194,7 @@ def solve(
     return powers, winner
 
 def inspect(pitch: int):
-    powers, trainee = solve(pitch)
-    assert powers  is not None
-    assert trainee is not None
+    powers, trainee = solve(pitch, verbose=True)
     powers = powers.cpu()
 
     print(powers)

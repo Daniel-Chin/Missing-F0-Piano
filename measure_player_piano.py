@@ -126,23 +126,18 @@ def analyze():
     for pitches, ratios in sorted(results, key=lambda x: len(x[0])):
         color = COLORS[len(pitches) - 1]
         plt.plot(VELOCITIES, ratios, label=str(pitches), c=color)
+    mean = torch.stack([ratios for _, ratios in results], dim=1).mean(dim=1)
+    plt.plot(VELOCITIES, mean, label='mean', c='k', linestyle='--', linewidth=3)
     plt.legend()
     plt.xlabel('Velocity')
     plt.ylabel('Power Ratio')
     plt.title(DISKLAVIER)
-    print('Eyeball time!!!')
-    input('Enter...')
+    for v, m in zip(VELOCITIES, mean):
+        print(v, ', ', m.item(), sep='')
     plt.show()
 
-MIN_POWER = 0.02
-
-def eyeballResults():
-    '''
-    Obtained after eyeballing the results from `analyze()`.  
-    '''
-    print('Edit the following conclusion in the source code.')
-    assert abs(0.06 / 3.0 - MIN_POWER) < 1e-6
-    print(f'Minimum power is max power * {MIN_POWER}')
+# eyeball result
+MIN_POWER = 0.019
 
 if __name__ == '__main__':
     print(f'{VELOCITIES = }')
@@ -150,6 +145,5 @@ if __name__ == '__main__':
         TIME_SUSTAIN + TIME_REST
     ) * len(VELOCITIES) + TIME_MUTE)
 
-    takeData()
+    # takeData()
     analyze()
-    eyeballResults()
