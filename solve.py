@@ -11,14 +11,20 @@ from music import *
 from human_freq_response import logFreqResponseDb, HUMAN_RANGE
 from measure_player_piano import MIN_POWER
 
+TUNE_LR = False
+
 DEFAULT_PERCEPTION_TOLERANCE = 0.1
 DEFAULT_FORGIVE_STRANGERS = 1.0
 DEFAULT_LR = 2e-2
 
+# @lru_cache(1)
+# def device():
+#     if torch.cuda.is_available():
+#         return torch.device('cuda')
+#     return torch.device('cpu')
+
 @lru_cache(1)
 def device():
-    if torch.cuda.is_available():
-        return torch.device('cuda')
     return torch.device('cpu')
 
 def getOvertones(pitch: int):
@@ -32,6 +38,7 @@ def solve(
     perception_tolerance: float = DEFAULT_PERCEPTION_TOLERANCE, 
     forgive_strangers: float = DEFAULT_FORGIVE_STRANGERS, 
     lr: float = DEFAULT_LR,
+    tune_lr: bool = TUNE_LR, 
 ):
     '''
     `perception_tolerance`: in semitones.  
@@ -57,57 +64,145 @@ def solve(
     
     # GD
     contributions = contributions.to(device())
-    def init(lr_: float):
-        activations = torch.ones(
-            (len(pitches_above), ), requires_grad=True, 
-            device=device(), 
-        )
-        optim = torch.optim.Adam([activations], lr=lr_)
-        return activations, optim
     response_envelope = logFreqResponseDb(pitch2freq_batch(
         target_overtones, 
     ).log()).exp().to(device())
-    def getLoss(activations: Tensor):
-        powers = activations.square()
-        produced = contributions.T @ powers
-        loss_needed = (
-            (produced[:-1] + 1e-4).log().square() * response_envelope
-        ).sum()
-        loss_stranger = (produced[-1] + forgive_strangers).log()
-        return loss_needed + loss_stranger
-    def oneEpoch(activations: Tensor, optim: torch.optim.Optimizer):
-        loss = getLoss(activations)
-        optim.zero_grad()
-        loss.backward()
-        grad = activations.grad
-        optim.step()
-        return loss, grad
 
-    # tune lr
-    # for try_lr, c in zip(
-    #     torch.linspace(-4, -1, 6).exp(), 
-    #     'rygcbm', 
-    # ):
-    #     label = f'lr={try_lr:.2e}'
-    #     activations, optim = init(try_lr.item())
-    #     losses = []
-    #     for _ in tqdm([*range(1000)], desc=label):
-    #         loss, grad = oneEpoch(activations, optim)
-    #         losses.append(loss.item())
-    #     plt.plot(losses, label=label, c=c)
-    # plt.legend()
-    # plt.show()
-    # return
+    class Trainee:
+        def __init__(
+            self, lr_: float, 
+            activations: Tensor | None = None,
+            lock_mask: Tensor | None = None,
+            lock_value: Tensor | None = None,
+        ):
+            self.lr = lr_
+            if activations is None:
+                self.activations = torch.ones(
+                    (len(pitches_above), ), requires_grad=True, 
+                    device=device(), 
+                )
+            else:
+                self.activations = activations
+            self.optim = torch.optim.Adam([self.activations], lr=lr_)
+            if lock_mask is None:
+                self.lock_mask = torch.ones_like(self.activations)
+            else:
+                self.lock_mask = lock_mask
+            if lock_value is None:
+                self.lock_value = torch.zeros_like(self.activations)
+            else:
+                self.lock_value = lock_value
+        
+        def clone(self):
+            activations = self.activations.detach().clone()
+            activations.requires_grad = True
+            return Trainee(
+                self.lr, 
+                activations, 
+                self.lock_mask .clone(), 
+                self.lock_value.clone(), 
+            )
+        
+        def applyLock(self):
+            with torch.no_grad():
+                self.activations.mul_(
+                    self.lock_mask, 
+                ).add_(self.lock_value)
 
-    activations, optim = init(lr)
-    for epoch in count():
-        loss, grad = oneEpoch(activations, optim)
-        if grad is not None and grad.abs().max() < 0.005:
+        def forward(self):
+            powers = self.activations.square()
+            produced = contributions.T @ powers
+            loss_needed = (
+                (produced[:-1] + 1e-4).log().square() * response_envelope
+            ).sum()
+            loss_stranger = (produced[-1] + forgive_strangers).log()
+            return loss_needed + loss_stranger, produced.detach()
+    
+        def oneEpoch(self):
+            loss, produced = self.forward()
+            self.optim.zero_grad()
+            loss.backward()
+            assert self.activations.grad is not None
+            self.activations.grad.mul_(self.lock_mask)
+            self.optim.step()
+            self.applyLock()
+            return loss.detach(), self.activations.grad, produced
+
+        def train(self):
+            flat_combo = 0
+            for epoch in tqdm(count()):
+                loss, grad, produced = self.oneEpoch()
+                if grad is not None and grad.abs().max() < 0.005:
+                    flat_combo += 1
+                else:
+                    flat_combo = 0
+                if flat_combo > 10:
+                    break
             print('converged at epoch', epoch)
-            break
-    assert (activations.square() < 1.0).all()
+            powers = self.activations.square()
+            assert (powers < 1.0).all()
+            return loss, produced
+        
+    if tune_lr:
+        for try_lr, c in zip(
+            torch.linspace(-4, -1, 6).exp(), 
+            'rygcbm', 
+        ):
+            label = f'lr={try_lr:.2e}'
+            trainee = Trainee(try_lr.item())
+            losses = []
+            for _ in tqdm([*range(1000)], desc=label):
+                loss, _, _ = trainee.oneEpoch()
+                losses.append(loss.item())
+            plt.plot(losses, label=label, c=c)
+        plt.legend()
+        plt.show()
+        return None, None
+
+    candidates = [Trainee(lr)]
+    while True:
+        losses = torch.tensor([x.train()[0] for x in candidates])
+        winner_i = losses.argmin()
+        winner: Trainee = candidates[winner_i]
+        print('locked', 'down' if winner_i == 0 else 'up')
+        with torch.no_grad():
+            powers = winner.activations.square()
+            unlocked = powers + (1.0 - winner.lock_mask) * 69.0
+            legals = (unlocked >= MIN_POWER).float()
+            if legals.all():
+                break
+            illegals = unlocked + legals * 69.0
+            near_0 = illegals.argmin()
+            near_min = (illegals - MIN_POWER).square().argmin()
+            lock_0   = winner.clone()
+            lock_min = winner.clone()
+            lock_0  .lock_mask [near_0  ] = 0.0
+            lock_min.lock_mask [near_min] = 0.0
+            lock_0  .lock_value[near_0  ] = 0.0
+            lock_min.lock_value[near_min] = MIN_POWER
+            lock_0  .applyLock()
+            lock_min.applyLock()
+            candidates = [lock_0, lock_min]
+    
+    return powers, winner
+
+def inspect(pitch: int):
+    powers, trainee = solve(pitch)
+    assert powers  is not None
+    assert trainee is not None
+    powers = powers.cpu()
+
+    print(powers)
+
+    plt.bar(*zip(*enumerate(powers)))
+    plt.show()
+
+    _, produced = trainee.forward()
+    plt.plot(produced[:-1].cpu(), 'o')
+    plt.axhline(1.0, c='r')
+    plt.show()
 
 if __name__ == '__main__':
-    solve(72)
-    solve(60)
-    solve(48)
+    inspect(72)
+    inspect(60)
+    inspect(48)
