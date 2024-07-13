@@ -11,6 +11,8 @@ import torch
 
 from piecewise_linear import PiecewiseLinear
 
+HUMAN_RANGE = (20, 20000)
+
 MILESTONES = torch.tensor([
     (log(   19), -40), 
     (log(   20), -10), 
@@ -26,13 +28,13 @@ MILESTONES = torch.tensor([
     (log(20001), -40), 
 ])
 
-freqResponseDb = PiecewiseLinear(
+logFreqResponseDb = PiecewiseLinear(
     MILESTONES[:, 0], MILESTONES[:, 1], 
-)
+).forward
 
 def visualize():
     x = torch.linspace(log(10), log(21000), 1000).exp()
-    y = freqResponseDb.forward(x.log())
+    y = logFreqResponseDb(x.log())
     plt.plot(x, y)
     plt.xscale('log')
     plt.xlabel('Frequency (Hz)')

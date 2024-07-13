@@ -24,10 +24,6 @@ VELOCITIES = [
     *range(20, 121, 10), 
     127, 
 ]
-print(f'{VELOCITIES = }')
-print('unit duration (sec):', (
-    TIME_SUSTAIN + TIME_REST
-) * len(VELOCITIES) + TIME_MUTE)
 
 MAX_CHORD_SIZE = 6
 COLORS = 'rygcbm'
@@ -140,14 +136,22 @@ def analyze():
     input('Enter...')
     plt.show()
 
+MIN_POWER = 0.02
+
 def eyeballResults():
     '''
     Obtained after eyeballing the results from `analyze()`.  
     '''
     print('Edit the following conclusion in the source code.')
-    print(f'Minimum power is max power * {0.06 / 3.0}')
+    assert abs(0.06 / 3.0 - MIN_POWER) < 1e-6
+    print(f'Minimum power is max power * {MIN_POWER}')
 
 if __name__ == '__main__':
+    print(f'{VELOCITIES = }')
+    print('unit duration (sec):', (
+        TIME_SUSTAIN + TIME_REST
+    ) * len(VELOCITIES) + TIME_MUTE)
+    
     takeData()
     analyze()
     eyeballResults()
