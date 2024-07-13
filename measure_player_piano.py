@@ -1,32 +1,40 @@
 from subprocess import Popen, PIPE, DEVNULL
-import signal
+from time import sleep
 import typing as tp
 import random
 import json
 
 import torch
+import torchaudio
 import mido
+from tqdm import tqdm
+from matplotlib import pyplot as plt
 
 from abs_sleep import AbsSleep
 
 from music import *
+from disklavier import DISKLAVIER, findDevice
 
 TIME_SUSTAIN = 0.7
 TIME_REST = 0.3
-TIME_MUTE = 8.0 # wait for the high register (without damper felt) to decay. Needed when the next event is quieter than the last.  
+TIME_MUTE = 7.0 # wait for the high register (without damper felt) to decay. Needed when the next event is quieter than the last.  
 
-VELOCITIES = [*range(0, 128, 8), 127]
+VELOCITIES = [
+    1, 2, 3, 5, 10, 
+    *range(20, 121, 10), 
+    127, 
+]
+print(f'{VELOCITIES = }')
+print('unit duration (sec):', (
+    TIME_SUSTAIN + TIME_REST
+) * len(VELOCITIES) + TIME_MUTE)
 
-INPUT = ''
-KEYWORD = 'Disklavier'
+MAX_CHORD_SIZE = 6
+COLORS = 'rygcbm'
+assert len(COLORS) >= MAX_CHORD_SIZE
 
 LOG_FILE = './log.json'
 RECORD_FILE = './piano_measure.wav'
-
-def findDevice(devices: tp.List[str]):
-    matched = [x for x in devices if KEYWORD.lower() in x.lower()]
-    assert len(matched) == 1, devices
-    return matched[0]
 
 def playPiano(absSleep: AbsSleep):
     outs = mido.get_output_names()  # type: ignore
@@ -35,12 +43,12 @@ def playPiano(absSleep: AbsSleep):
         with open(LOG_FILE, 'w') as f:
             while True:
                 try:
-                    pitches: tp.List[int] = (torch.randn((
-                        random.randint(1, 6), 
+                    pitches: tp.Set[int] = set((torch.randn((
+                        random.randint(1, MAX_CHORD_SIZE), 
                     )) * 18 + 60).clamp(
                         PIANO_RANGE.start + 2, 
                         PIANO_RANGE.stop  - 2, 
-                    ).round().to(torch.int).tolist()
+                    ).round().to(torch.int).tolist())
                     print(pitches)
                     for velocity in VELOCITIES:
                         absSleep.sleep(TIME_REST)
@@ -52,16 +60,24 @@ def playPiano(absSleep: AbsSleep):
                         absSleep.sleep(TIME_SUSTAIN)
                         port.panic()
                     absSleep.sleep(TIME_MUTE)
-                    json.dump(pitches, f, indent=2)
+                    json.dump(list(pitches), f)
                     f.write('\n')
                 except KeyboardInterrupt:
                     print('bye')
                     port.panic()
                     break
 
-def main():
-    print('Make sure the piano volume is at 4/5: OOOO_')
-    input('Press Enter to confirm >')
+def confirm(msg: str):
+    print()
+    assert input(msg + ' y/n >').lower() == 'y'
+
+def takeData():
+    confirm('Make sure the piano volume is at 2.5/5.0   LED: OO*__')
+    confirm('Mute the laptop.')
+    confirm("The laptop should stay awake.")
+    confirm('Get ready to retreat to a non-recorded zone.')
+    for _ in tqdm(range(100), desc='迅速撤离'):
+        sleep(0.03)
     with Popen([
         '/usr/bin/ffmpeg', 
         '-f', 'alsa', 
@@ -80,5 +96,58 @@ def main():
             p.wait()
     print('ok')
 
+def analyze():
+    START = 1.1
+    TAKE = 0.4
+
+    with open(LOG_FILE) as f:
+        pitches_tape = [json.loads(line) for line in f]
+    print('loading audio...')
+    stereo, sr = torchaudio.load(RECORD_FILE)
+    print(f'{sr = }')
+    mono = stereo.mean(dim=0)
+    n_samples, = mono.shape
+    print('audio time (sec):', n_samples / sr)
+    def trim(start: float):
+        return mono[
+            round(sr * start) : 
+            round(sr * (start + TAKE))
+        ]
+
+    results: tp.List[tp.Tuple[
+        tp.List[int], Tensor, 
+    ]] = []
+    cursor = START
+    for pitches in tqdm(pitches_tape):
+        pitches: tp.List[int]
+        powers = torch.zeros((len(VELOCITIES), ))
+        for i in range(len(VELOCITIES)):
+            clip = trim(cursor)
+            powers[i] = clip.square().mean()
+            cursor += TIME_REST + TIME_SUSTAIN
+        ratios = powers / powers.mean()
+        results.append((sorted(pitches), ratios))
+        cursor += TIME_MUTE
+    
+    for pitches, ratios in sorted(results, key=lambda x: len(x[0])):
+        color = COLORS[len(pitches) - 1]
+        plt.plot(VELOCITIES, ratios, label=str(pitches), c=color)
+    plt.legend()
+    plt.xlabel('Velocity')
+    plt.ylabel('Power Ratio')
+    plt.title(DISKLAVIER)
+    print('Eyeball time!!!')
+    input('Enter...')
+    plt.show()
+
+def eyeballResults():
+    '''
+    Obtained after eyeballing the results from `analyze()`.  
+    '''
+    print('Edit the following conclusion in the source code.')
+    print(f'Minimum power is max power * {0.06 / 3.0}')
+
 if __name__ == '__main__':
-    main()
+    takeData()
+    analyze()
+    eyeballResults()
