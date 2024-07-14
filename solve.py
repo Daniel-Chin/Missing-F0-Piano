@@ -141,7 +141,7 @@ def solve(
             flat_combo = 0
             counter = count()
             if verbose:
-                counter = tqdm(counter)
+                counter = tqdm(counter, desc='epoch')
             for epoch in counter:
                 loss, grad, produced = self.oneEpoch()
                 if grad is not None and grad.abs().max() < 0.005:
@@ -150,8 +150,6 @@ def solve(
                     flat_combo = 0
                 if flat_combo > 10:
                     break
-            if verbose:
-                print('converged at epoch', epoch)
             powers = self.activations.square()
             assert (powers < 1.0).all()
             return loss, produced
