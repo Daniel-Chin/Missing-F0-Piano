@@ -2,6 +2,8 @@ import typing as tp
 
 import mido
 
+from playMidi import main as playMidi
+
 DISKLAVIER = 'Disklavier'
 
 def findDevice(devices: tp.List[str]):
@@ -9,7 +11,16 @@ def findDevice(devices: tp.List[str]):
     assert len(matched) == 1, devices
     return matched[0]
 
-def Disklavier():
+def findDeviceOut():
     outs = mido.get_output_names()  # type: ignore
-    device = findDevice(outs)
-    return mido.open_output(device) # type: ignore
+    return findDevice(outs)
+
+def Disklavier():
+    return mido.open_output(findDeviceOut()) # type: ignore
+
+def playMidiOnDisklavier(
+    filename: str | None = None, verbose: bool = True, 
+):
+    return playMidi(
+        filename, findDeviceOut(), verbose=verbose, 
+    )
