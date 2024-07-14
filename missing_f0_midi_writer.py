@@ -16,6 +16,16 @@ class MissingF0MidiWriter:
     def registerSolution(self, pitch: int, powers: Tensor):
         self.solved[pitch] = powers
     
+    def addRaw(
+        self, pitch: int, start: float, end: float, 
+        velocity: int = 127, 
+    ):
+        note = pretty_midi.Note(
+            velocity=velocity, pitch=pitch, 
+            start=start, end=end, 
+        )
+        self.piano.notes.append(note)
+    
     def add(
         self, pitch: int, 
         start: float, end: float, 
@@ -31,8 +41,4 @@ class MissingF0MidiWriter:
             velocity: int = velocity_tensor.item()  # type: ignore
             if velocity == 0:
                 continue
-            note = pretty_midi.Note(
-                velocity=velocity, pitch=using_pitch, 
-                start=start, end=end, 
-            )
-            self.piano.notes.append(note)
+            self.addRaw(using_pitch, start, end, velocity)
