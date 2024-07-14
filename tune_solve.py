@@ -6,8 +6,8 @@ from solve import solve
 from missing_f0_midi_writer import MissingF0MidiWriter
 
 PITCH = 40
-PERCEPTION_TOLERANCES = (0.1, )
-FORGIVE_STRANGERSES = (None, )
+PERCEPTION_TOLERANCES = (0.25, )
+PENALIZE_STRANGERSES = (0.0, )
 
 USE_SYNTH_NOT_DISKLAVIER = True
 
@@ -16,13 +16,13 @@ TEMP_MIDI = 'temp/%d.mid'
 def main():
     def experiments():
         return enumerate(product(
-            PERCEPTION_TOLERANCES, FORGIVE_STRANGERSES, 
+            PERCEPTION_TOLERANCES, PENALIZE_STRANGERSES, 
         ))
-    for i, (perception_tolerance, forgive_strangers) in experiments():
+    for i, (perception_tolerance, penalize_strangers) in experiments():
         writer = MissingF0MidiWriter()
         print('solving... ', end='', flush=True)
         powers, _ = solve(
-            PITCH, perception_tolerance, forgive_strangers, 
+            PITCH, perception_tolerance, penalize_strangers, 
             # verbose=True,
         )
         print('ok')
@@ -33,9 +33,9 @@ def main():
 
     input('Press Enter to play...')
 
-    for i, (perception_tolerance, forgive_strangers) in experiments():
+    for i, (perception_tolerance, penalize_strangers) in experiments():
         print(f'{perception_tolerance = }')
-        print(f'{forgive_strangers = }')
+        print(f'{penalize_strangers = }')
         if USE_SYNTH_NOT_DISKLAVIER:
             with Popen([
                 'synth-midi', TEMP_MIDI % i, 

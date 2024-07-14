@@ -13,7 +13,7 @@ from human_freq_response import logFreqResponseDb, HUMAN_RANGE
 from measure_player_piano import MIN_POWER
 
 DEFAULT_PERCEPTION_TOLERANCE = 0.1
-DEFAULT_FORGIVE_STRANGERS = 1.0
+DEFAULT_PENALIZE_STRANGERS = 1.0
 DEFAULT_LR = 4e-2
 
 # @lru_cache(1)
@@ -35,14 +35,14 @@ def getOvertones(pitch: int):
 def solve(
     target_pitch: int, 
     perception_tolerance: float = DEFAULT_PERCEPTION_TOLERANCE, 
-    forgive_strangers: float = DEFAULT_FORGIVE_STRANGERS, 
+    penalize_strangers: float = DEFAULT_PENALIZE_STRANGERS, 
     lr: float = DEFAULT_LR,
     tune_lr: tp.Tuple[float, float] | None = None, 
     verbose: bool = False,
 ):
     '''
     `perception_tolerance`: in semitones.  
-    `forgive_strangers`: how much to forgive the strangers, i.e., produced undesired frequencies.  
+    `penalize_strangers`: how much to penalize the strangers, i.e., produced undesired frequencies.  
     '''
     assert target_pitch in PIANO_RANGE
     target_overtones = getOvertones(target_pitch)[1:]
@@ -60,7 +60,7 @@ def solve(
             else:
                 contributions[i_above, -1] += logFreqResponseDb(
                     pitch2freq_batch(overtone).log().unsqueeze(0), 
-                ).exp()[0]
+                ).exp().squeeze(0)
     
     # GD
     contributions = contributions.to(device())
@@ -123,8 +123,13 @@ def solve(
             loss_needed = (
                 (produced[:-1] + 1e-4).log().square() * response_envelope
             ).sum()
-            loss_stranger = (produced[-1]).log()
-            return loss_needed + loss_stranger, produced.detach()
+            loss_stranger_cool = (produced[-1]).log()
+            loss_stranger_adhoc = produced[-1] * penalize_strangers
+            return sum([
+                loss_needed, 
+                loss_stranger_cool, 
+                loss_stranger_adhoc, 
+            ]), produced.detach()
     
         def oneEpochGivenForward(
             self, loss: Tensor, 
