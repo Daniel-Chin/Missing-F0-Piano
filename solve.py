@@ -125,11 +125,11 @@ def solve(
             ).sum()
             loss_stranger_cool = (produced[-1]).log()
             loss_stranger_adhoc = produced[-1] * penalize_strangers
-            return sum([
-                loss_needed, 
-                loss_stranger_cool, 
-                loss_stranger_adhoc, 
-            ]), produced.detach()
+            return (
+                loss_needed + 
+                loss_stranger_cool + 
+                loss_stranger_adhoc
+            ), produced.detach()
     
         def oneEpochGivenForward(
             self, loss: Tensor, 
@@ -166,6 +166,7 @@ def solve(
                         break
                 if epoch > 6000:
                     plt.plot(losses)
+                    plt.title('loss')
                     plt.show()
                     print(f'{max_grad = }')
                     import pdb; pdb.set_trace()
