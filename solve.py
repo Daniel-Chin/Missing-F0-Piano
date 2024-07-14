@@ -164,7 +164,7 @@ def solve(
                     boredom += 1
                     if boredom > 20:
                         break
-                if epoch > 6000:
+                if epoch > 100000:
                     plt.plot(losses)
                     plt.title('loss')
                     plt.show()
