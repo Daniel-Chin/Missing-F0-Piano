@@ -87,7 +87,7 @@ def solve(
             self.optim = torch.optim.Adam([self.activations], lr=lr_)
             if lock_mask is None:
                 self.lock_mask = torch.ones_like(self.activations)
-            else:
+            else:   # 0: locked, 1: unlocked
                 self.lock_mask = lock_mask
             if lock_value is None:
                 self.lock_value = torch.zeros_like(self.activations)
@@ -109,6 +109,14 @@ def solve(
                 self.activations.mul_(
                     self.lock_mask, 
                 ).add_(self.lock_value)
+        
+        def breakFree(self):
+            THRESHOLD = 0.01
+            with torch.no_grad():
+                self.activations[torch.logical_and(
+                    self.activations < THRESHOLD, 
+                    self.lock_mask == 1.0, 
+                )] = THRESHOLD
 
         def forward(self):
             powers = self.activations.square()
@@ -189,6 +197,8 @@ def solve(
             lock_min.lock_value[near_min] = MIN_POWER
             lock_0  .applyLock()
             lock_min.applyLock()
+            lock_0  .breakFree()
+            lock_min.breakFree()
             candidates = [lock_0, lock_min]
     
     return powers, winner
