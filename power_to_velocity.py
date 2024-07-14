@@ -32,4 +32,4 @@ def power2velocity(power: Tensor):
     return x
 
 # def power2velocity(power: Tensor):
-#     return (power.sqrt() * 127).round().clamp(0, 127).to(torch.int)
+#     return (power.pow(.25) * 127).round().clamp(0, 127).to(torch.int)
