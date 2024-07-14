@@ -30,3 +30,6 @@ def power2velocity(power: Tensor):
     x = x.round().clamp(1, 127).to(torch.int)
     x[power < MIN_POWER] = 0
     return x
+
+# def power2velocity(power: Tensor):
+#     return (power.sqrt() * 127).round().clamp(0, 127).to(torch.int)
