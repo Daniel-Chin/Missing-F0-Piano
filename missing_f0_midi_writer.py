@@ -41,4 +41,5 @@ class MissingF0MidiWriter:
             velocity: int = velocity_tensor.item()  # type: ignore
             if velocity == 0:
                 continue
+            print('+', using_pitch - pitch, format(velocity / 127, '.0%'))
             self.addRaw(using_pitch, start, end, velocity)
