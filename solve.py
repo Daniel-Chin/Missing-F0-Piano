@@ -1,6 +1,5 @@
 from functools import lru_cache
 from itertools import count
-import sys
 import typing as tp
 
 import torch
@@ -15,6 +14,8 @@ from measure_player_piano import MIN_POWER
 DEFAULT_PERCEPTION_TOLERANCE = 0.1
 DEFAULT_PENALIZE_STRANGERS = 1.0
 DEFAULT_LR = 4e-2
+
+FREE_BUT_SMALL = 0.05
 
 # @lru_cache(1)
 # def device():
@@ -32,18 +33,10 @@ def getOvertones(pitch: int):
         f0, HUMAN_RANGE[1], f0, 
     ))
 
-def solve(
-    target_pitch: int, 
-    perception_tolerance: float = DEFAULT_PERCEPTION_TOLERANCE, 
-    penalize_strangers: float = DEFAULT_PENALIZE_STRANGERS, 
-    lr: float = DEFAULT_LR,
-    tune_lr: tp.Tuple[float, float] | None = None, 
-    verbose: bool = False,
+@lru_cache(3)
+def discretize(
+    target_pitch: int, perception_tolerance: float, 
 ):
-    '''
-    `perception_tolerance`: in semitones.  
-    `penalize_strangers`: how much to penalize the strangers, i.e., produced undesired frequencies.  
-    '''
     assert target_pitch in PIANO_RANGE
     target_overtones = getOvertones(target_pitch)[1:]
     pitches_above = range(target_pitch + 1, PIANO_RANGE.stop)
@@ -61,139 +54,171 @@ def solve(
                 contributions[i_above, -1] += logFreqResponseDb(
                     pitch2freq_batch(overtone).log().unsqueeze(0), 
                 ).exp().squeeze(0)
-    
-    # GD
-    contributions = contributions.to(device())
     response_envelope = logFreqResponseDb(pitch2freq_batch(
         target_overtones, 
-    ).log()).exp().to(device())
+    ).log()).exp()
+    return contributions, response_envelope, pitches_above
 
-    class Trainee:
-        def __init__(
-            self, lr_: float, 
-            activations: Tensor | None = None,
-            lock_mask: Tensor | None = None,
-            lock_value: Tensor | None = None,
-        ):
-            self.lr = lr_
-            if activations is None:
-                self.activations = torch.ones(
-                    (len(pitches_above), ), device=device(), 
-                ) * 0.01
-                self.activations.requires_grad = True
-            else:
-                self.activations = activations
-            self.optim = torch.optim.Adam([self.activations], lr=lr_)
-            if lock_mask is None:
-                self.lock_mask = torch.ones_like(self.activations)
-            else:   # 0: locked, 1: unlocked
-                self.lock_mask = lock_mask
-            if lock_value is None:
-                self.lock_value = torch.zeros_like(self.activations)
-            else:
-                self.lock_value = lock_value
-        
-        def clone(self):
-            activations = self.activations.detach().clone()
-            activations.requires_grad = True
-            return Trainee(
-                self.lr, 
-                activations, 
-                self.lock_mask .clone(), 
-                self.lock_value.clone(), 
-            )
-        
-        def applyLock(self):
-            with torch.no_grad():
-                self.activations.mul_(
-                    self.lock_mask, 
-                ).add_(self.lock_value)
-        
-        def breakFree(self):
-            THRESHOLD = 0.01
-            with torch.no_grad():
-                self.activations[torch.logical_and(
-                    self.activations < THRESHOLD, 
-                    self.lock_mask == 1.0, 
-                )] = THRESHOLD
+class Trainee:
+    def __init__(
+        self, 
+        target_pitch: int, 
+        perception_tolerance: float, 
+        penalize_strangers: float, 
+        lr: float, 
+        activations: Tensor | None = None,
+        lock_mask  : Tensor | None = None,
+        lock_value : Tensor | None = None,
+    ):
+        self.target_pitch = target_pitch
+        self.perception_tolerance = perception_tolerance
+        self.penalize_strangers = penalize_strangers
+        self.lr = lr
 
-        def forward(self):
-            powers = self.activations.square()
-            produced = contributions.T @ powers
-            loss_needed = (
-                (produced[:-1] + 1e-4).log().square() * response_envelope
-            ).sum()
-            loss_stranger_cool = (produced[-1]).log()
-            loss_stranger_adhoc = produced[-1] * penalize_strangers
-            return (
-                loss_needed + 
-                loss_stranger_cool + 
-                loss_stranger_adhoc
-            ), produced.detach()
+        contributions, response_envelope, pitches_above = discretize(
+            target_pitch, perception_tolerance, 
+        )
+        
+        self.contributions = contributions.to(device())
+        self.response_envelope = response_envelope.to(device())
+
+        if activations is None:
+            self.activations = torch.ones(
+                (len(pitches_above), ), device=device(), 
+            ) * FREE_BUT_SMALL
+            self.activations.requires_grad = True
+        else:
+            self.activations = activations
+        self.optim = torch.optim.Adam([self.activations], lr=lr)
+
+        if lock_mask is None:
+            self.lock_mask = torch.ones_like(self.activations)
+        else:   # 0: locked, 1: unlocked
+            self.lock_mask = lock_mask
+        if lock_value is None:
+            self.lock_value = torch.zeros_like(self.activations)
+        else:
+            self.lock_value = lock_value
     
-        def oneEpochGivenForward(
-            self, loss: Tensor, 
-        ):
-            self.optim.zero_grad()
-            loss.backward()
-            assert self.activations.grad is not None
-            self.activations.grad.mul_(self.lock_mask)
-            self.optim.step()
-            self.applyLock()
-            return self.activations.grad
-
-        def train(self):
-            losses = []
-            minimum = (self.activations, torch.inf)
-            boredom = 0
-            counter = count()
-            if verbose:
-                counter = tqdm(counter, desc='epoch')
-            for epoch in counter:
-                loss, produced = self.forward()
-                loss_item = loss.detach().item()
-                losses.append(loss_item)
-                new_low = loss_item < minimum[1]
-                if new_low:
-                    minimum = (self.activations.detach().clone(), loss_item)
-                grad = self.oneEpochGivenForward(loss)
-                max_grad = grad.abs().max().item()
-                if new_low and max_grad > 0.005:
-                    boredom = 0
-                else:
-                    boredom += 1
-                    if boredom > 20:
-                        break
-                if epoch > 100000:
-                    plt.plot(losses)
-                    plt.title('loss')
-                    plt.show()
-                    print(f'{max_grad = }')
-                    import pdb; pdb.set_trace()
-            self.activations = minimum[0]
-            powers = self.activations.square()
-            assert (powers < 1.0).all(), powers
-            return minimum[1], produced
+    def clone(self):
+        activations = self.activations.detach().clone()
+        activations.requires_grad = True
+        return Trainee(
+            self.target_pitch,
+            self.perception_tolerance, 
+            self.penalize_strangers,
+            self.lr, 
+            activations, 
+            self.lock_mask .clone(), 
+            self.lock_value.clone(), 
+        )
     
-    if tune_lr is not None:
-        for try_lr, c in zip(
-            torch.linspace(*tune_lr, 6).exp(), 
-            'rygcbm', 
-        ):
-            label = f'lr={try_lr:.2e}'
-            trainee = Trainee(try_lr.item())
-            losses = []
-            for _ in tqdm([*range(1000)], desc=label):
-                loss, _ = trainee.forward()
-                trainee.oneEpochGivenForward(loss)
-                losses.append(loss.item())
-            plt.plot(losses, label=label, c=c)
-        plt.legend()
-        plt.title('Loss')
-        plt.show()
-        return trainee.activations.square(), trainee
+    def applyLock(self):
+        with torch.no_grad():
+            self.activations.mul_(
+                self.lock_mask, 
+            ).add_(self.lock_value)
+    
+    def breakFree(self):
+        THRESHOLD = FREE_BUT_SMALL
+        with torch.no_grad():
+            self.activations[torch.logical_and(
+                self.activations < THRESHOLD, 
+                self.lock_mask == 1.0, 
+            )] = THRESHOLD
 
-    candidates = [Trainee(lr)]
+    def forward(self):
+        powers = self.activations.square()
+        produced = self.contributions.T @ powers
+        loss_needed = (
+            (produced[:-1] + 1e-4).log().square() * self.response_envelope
+        ).sum()
+        loss_stranger_cool = (produced[-1] + 1e-6).log()
+        loss_stranger_adhoc = produced[-1] * self.penalize_strangers
+        return (
+            loss_needed + 
+            loss_stranger_cool + 
+            loss_stranger_adhoc
+        ), produced.detach()
+
+    def oneEpochGivenForward(
+        self, loss: Tensor, 
+    ):
+        self.optim.zero_grad()
+        loss.backward()
+        assert self.activations.grad is not None
+        self.activations.grad.mul_(self.lock_mask)
+        self.optim.step()
+        self.applyLock()
+        return self.activations.grad
+
+    def train(self, verbose: bool = False):
+        losses = []
+        minimum = (self.activations, torch.inf)
+        boredom = 0
+        counter = count()
+        if verbose:
+            counter = tqdm(counter, desc='epoch')
+        for epoch in counter:
+            loss, produced = self.forward()
+            loss_item = loss.detach().item()
+            losses.append(loss_item)
+            new_low = loss_item < minimum[1]
+            if new_low:
+                minimum = (self.activations.detach().clone(), loss_item)
+            grad = self.oneEpochGivenForward(loss)
+            max_grad = grad.abs().max().item()
+            if new_low and max_grad > 0.005:
+                boredom = 0
+            else:
+                boredom += 1
+                if boredom > 20:
+                    break
+            if epoch > 100000:
+                plt.plot(losses)
+                plt.title('loss')
+                plt.show()
+                print(f'{max_grad = }')
+                import pdb; pdb.set_trace()
+        self.activations = minimum[0]
+        powers = self.activations.square()
+        assert (powers < 1.0).all(), powers
+        return minimum[1], produced
+
+def tuneLR(target_pitch: int, try_lrs: Tensor, colors: tp.Iterable[str]):
+    for try_lr, c in zip(try_lrs, colors):
+        label = f'lr={try_lr:.2e}'
+        trainee = Trainee(
+            target_pitch, 
+            DEFAULT_PERCEPTION_TOLERANCE, 
+            DEFAULT_PENALIZE_STRANGERS, 
+            try_lr.item(), 
+        )
+        losses = []
+        for _ in tqdm([*range(1000)], desc=label):
+            loss, _ = trainee.forward()
+            trainee.oneEpochGivenForward(loss)
+            losses.append(loss.item())
+        plt.plot(losses, label=label, c=c)
+    plt.legend()
+    plt.title('Loss')
+    plt.show()
+
+def solve(
+    target_pitch: int, 
+    perception_tolerance: float = DEFAULT_PERCEPTION_TOLERANCE, 
+    penalize_strangers: float = DEFAULT_PENALIZE_STRANGERS, 
+    lr: float = DEFAULT_LR, 
+    verbose: bool = False,
+):
+    '''
+    `perception_tolerance`: in semitones.  
+    `penalize_strangers`: how much to penalize the strangers, i.e., produced undesired frequencies.  
+    '''
+    candidates = [Trainee(
+        target_pitch, perception_tolerance,
+        penalize_strangers, lr, 
+    )]
     while True:
         losses = torch.tensor([x.train()[0] for x in candidates])
         winner_i: int = losses.argmin().item()  # type: ignore
@@ -239,9 +264,11 @@ def inspect(pitch: int):
     plt.show()
 
 if __name__ == '__main__':
-    # solve(72, tune_lr=(-3, -2))
-    # solve(60, tune_lr=(-3, -2))
-    # solve(48, tune_lr=(-3, -2))
+    # try_lrs = torch.linspace(-3, -2, 6).exp()
+    # colors = 'rygcbm'
+    # tuneLR(72, try_lrs, colors)
+    # tuneLR(60, try_lrs, colors)
+    # tuneLR(48, try_lrs, colors)
 
     inspect(72)
     inspect(60)
