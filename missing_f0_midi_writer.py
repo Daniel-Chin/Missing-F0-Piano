@@ -10,6 +10,7 @@ class MissingF0MidiWriter:
     def __init__(self):
         self.midi = pretty_midi.PrettyMIDI()
         self.piano = pretty_midi.Instrument(0, name='Piano')
+        self.midi.instruments.append(self.piano)
         self.solved: tp.Dict[int, Tensor] = {}
     
     def registerSolution(self, pitch: int, powers: Tensor):
