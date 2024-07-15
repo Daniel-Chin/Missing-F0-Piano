@@ -76,12 +76,15 @@ def Root(audioStateMachine: AudioStateMachine):
             trainee.breakFree()
     getPercTole = HParamControl(
         root, onSlide, 'Perception Tolerance', -5, np.log(0.5), 
+        log_default=-2.8,
     )
     getPenaStra = HParamControl(
-        root, onSlide, 'Penalize Stranger', -3, 2, 
+        root, onSlide, 'Penalize Stranger', -1, 5, 
+        log_default=2.0,
     )
     getLearRate = HParamControl(
         root, onSlide, 'Learning Rate', -9, -3, 
+        log_default=-3.6,
     )
     getRespResp = HParamControl(
         root, onSlide, 'Respect Response', -5, 0, 
@@ -233,6 +236,7 @@ class AudioStateMachine:
         now = int(time())
         if now != self.last_play_time:
             pitch_i = (now % 6) // 2
+            pitch_i = 1
             pitch = GUI_PITCHES[pitch_i]
             self.last_play_time = now
             self.panic()
