@@ -1,4 +1,9 @@
+from __future__ import annotations
+
 import typing as tp
+from os import path
+from contextlib import contextmanager
+from time import time
 
 import numpy as np
 import tkinter as tk
@@ -9,12 +14,14 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import torch
 from torch import Tensor
+import fluidsynth
 
 from my import profileFrequency
 
 from shared import *
 from music import *
 from solve import Trainee
+from power_to_velocity import power2velocity
 
 N_EPOCHS_PER_FRAME = 16
 
@@ -51,7 +58,7 @@ def initFig():
     fig.tight_layout(rect=(-.04, 0, 1.02, 1))
     return fig, lines
 
-def Root():
+def Root(audioStateMachine: AudioStateMachine):
     root = tk.Tk()
     root.title('Solver Tuner')
     fig, lines = initFig()
@@ -89,6 +96,7 @@ def Root():
             lines, 
             trainees_persistent, 
         )
+        audioStateMachine.loop(trainees_persistent[GUI_AUDIO_INDEX].activations)
         return lines
     anim = FuncAnimation(
         fig, animate_, 
@@ -184,9 +192,57 @@ def animate(
         line.set_ydata(data)
 
 def main():
-    root, anim = Root()
-    root.mainloop()
+    with fluidsynthContext() as fs:
+        audioStateMachine = AudioStateMachine(fs)
+        root, anim = Root(audioStateMachine)
+        root.mainloop()
     assert anim is not None # keep alive
+
+@contextmanager
+def fluidsynthContext():
+    fs = fluidsynth.Synth()
+    fs.start()
+    sfid = fs.sfload(path.expanduser(
+        '~/roaming_linux_daniel/soundfonts/Yamaha-Grand-Lite-v2.0.sf2',
+    ))
+    fs.program_select(chan=0, sfid=sfid, bank=0, preset=0)
+    try:
+        yield fs
+    finally:
+        fs.delete()
+
+class AudioStateMachine:
+    def __init__(self, fs: fluidsynth.Synth):
+        self.fs = fs
+
+        self.last_play_time = 0
+        self.down_keys: tp.List[int] = []
+    
+    def play(self, pitch: int, velocity: int):
+        self.down_keys.append(pitch)
+        self.fs.noteon(0, pitch, velocity)
+    
+    def panic(self):
+        for pitch in self.down_keys:
+            self.fs.noteoff(0, pitch)
+        self.down_keys.clear()
+
+    def loop(self, activations: Tensor):
+        now = int(time())
+        if now != self.last_play_time:
+            pitch = GUI_PITCHES[GUI_AUDIO_INDEX]
+            self.last_play_time = now
+            self.panic()
+            if now % 2 == 0:
+                self.play(pitch + 12, 127)
+            else:
+                velocities = power2velocity(activations.square())
+                for p, v in zip(range(
+                    pitch + 1, PIANO_RANGE.stop,
+                ), velocities, 
+                ):
+                    v_: int = v.item()  # type: ignore
+                    self.play(p, v_)
 
 if __name__ == '__main__':
     main()

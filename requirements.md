@@ -2,3 +2,4 @@
 - tqdm
 - pytorch
 - matplotlib
+- pyfluidsynth

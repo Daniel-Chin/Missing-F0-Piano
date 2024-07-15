@@ -3,6 +3,7 @@ from functools import lru_cache
 import torch
 
 GUI_PITCHES = [40, 48, 60]
+GUI_AUDIO_INDEX = 1
 
 @lru_cache(1)
 def device():
