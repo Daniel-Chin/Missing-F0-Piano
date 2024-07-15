@@ -76,11 +76,16 @@ def Root():
     getLearRate = HParamControl(
         root, onSlide, 'Learning Rate', -9, -3, 
     )
+    getRespResp = HParamControl(
+        root, onSlide, 'Respect Response', -5, 0, 
+        log_default=0.0,
+    )
     def animate_(_):
         animate(
             getPercTole(), 
             getPenaStra(), 
             getLearRate(), 
+            getRespResp(), 
             lines, 
             trainees_persistent, 
         )
@@ -96,9 +101,11 @@ def HParamControl(
     text: str, 
     log_from: float, log_to: float, 
     allow_zero: bool = True, 
+    log_default: float | None = None, 
 ):
-    default = (log_from + log_to) / 2
-    var = tk.DoubleVar(value=default)
+    if log_default is None:
+        log_default = (log_from + log_to) / 2
+    var = tk.DoubleVar(value=log_default)
     def getValue() -> float:
         ex = var.get()
         if allow_zero and abs(ex - log_from) < 1e-6:
@@ -136,6 +143,7 @@ def animate(
     perc_tole: float, 
     pena_stra: float, 
     lr: float,
+    respect_response: float, 
     lines: tp.List[Line2D], 
     trainees_persistent: tp.List[Trainee], 
 ):
@@ -144,6 +152,7 @@ def animate(
     ):
         trainee = Trainee(
             pitch, perc_tole, pena_stra, lr, 
+            respect_response, 
             trainee_persistent.activations.detach().clone(), 
         )
         for epoch in range(N_EPOCHS_PER_FRAME):
@@ -171,7 +180,8 @@ def animate(
         spectrum: Tensor = torch.fft.rfft(
             mixdown, norm='forward', 
         )
-        line.set_ydata(spectrum.cpu().numpy())
+        data = spectrum.abs().cpu().numpy()
+        line.set_ydata(data)
 
 def main():
     root, anim = Root()

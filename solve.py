@@ -27,6 +27,7 @@ def getOvertones(pitch: int):
 @lru_cache(len(GUI_PITCHES))    # don't mutate out tensor
 def discretize(
     target_pitch: int, perception_tolerance: float, 
+    respect_response: float, 
 ):
     assert target_pitch in PIANO_RANGE
     target_overtones = getOvertones(target_pitch)[1:]
@@ -42,12 +43,12 @@ def discretize(
             if deviate[i] < perception_tolerance:
                 contributions[i_above, i] += 1.0
             else:
-                contributions[i_above, -1] += logFreqResponseDb(
+                contributions[i_above, -1] += (logFreqResponseDb(
                     pitch2freq_batch(overtone).log().unsqueeze(0), 
-                ).exp().squeeze(0)
-    response_envelope = logFreqResponseDb(pitch2freq_batch(
+                ) * respect_response).exp().squeeze(0)
+    response_envelope = (logFreqResponseDb(pitch2freq_batch(
         target_overtones, 
-    ).log()).exp()
+    ).log()) * respect_response).exp()
     return contributions, response_envelope, pitches_above
 
 class Trainee:
@@ -57,6 +58,7 @@ class Trainee:
         perception_tolerance: float, 
         penalize_strangers: float, 
         lr: float, 
+        respect_response: float = 1.0, 
         activations: Tensor | None = None,
         lock_mask  : Tensor | None = None,
         lock_value : Tensor | None = None,
@@ -65,9 +67,11 @@ class Trainee:
         self.perception_tolerance = perception_tolerance
         self.penalize_strangers = penalize_strangers
         self.lr = lr
+        self.respect_response = respect_response
 
         contributions, response_envelope, pitches_above = discretize(
             target_pitch, perception_tolerance, 
+            respect_response, 
         )
         
         self.contributions = contributions.to(device())
@@ -99,6 +103,7 @@ class Trainee:
             self.perception_tolerance, 
             self.penalize_strangers,
             self.lr, 
+            self.respect_response, 
             activations, 
             self.lock_mask .clone(), 
             self.lock_value.clone(), 
