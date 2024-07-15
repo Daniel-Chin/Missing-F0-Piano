@@ -16,29 +16,34 @@ from shared import *
 from music import *
 from solve import Trainee
 
-N_EPOCHS_PER_FRAME = 2
+N_EPOCHS_PER_FRAME = 16
 
 WINDOW_WIDTH = 1000
 SR = 22050
 NYQUIST = SR / 2
-PAGE_LEN = 1024
+PAGE_LEN = 2048
 N_FREQ_BINS = PAGE_LEN // 2 + 1
 FREQ_BINS = np.linspace(0, NYQUIST, N_FREQ_BINS)
 
 TWO_PI_OVER_SR = 2 * torch.pi / SR
-TIME_LADDER = TWO_PI_OVER_SR * torch.arange(PAGE_LEN).unsqueeze(0).unsqueeze(1).contiguous()
+TIME_LADDER = TWO_PI_OVER_SR * torch.arange(
+    PAGE_LEN, 
+).unsqueeze(0).unsqueeze(1).contiguous().to(device())
 
 def initFig():
     fig, axes = plt.subplots(nrows = len(GUI_PITCHES), sharex=True)
     lines: tp.List[Line2D] = []
     for ax, pitch in zip(axes, GUI_PITCHES):
         ax: Axes
-        line, = ax.plot(FREQ_BINS, np.zeros(N_FREQ_BINS))
+        line, = ax.plot(
+            FREQ_BINS, np.zeros(N_FREQ_BINS), 
+            'o', markersize=0.5, 
+        )
         lines.append(line)
         f0 = pitch2freq(pitch)
         partials = np.arange(f0, NYQUIST, f0)
         ax.plot(partials, np.ones_like(partials), 'o', c='k', markersize=1)
-        ax.set_ylim(bottom=0.0)
+        ax.set_ylim(bottom=0.0, top=1.2)
         ax.set_xlim(left=0.0, right=NYQUIST)
         ax.set_ylabel('Amplitude')
         ax.set_title(str(pitch))
@@ -69,7 +74,7 @@ def Root():
         root, onSlide, 'Penalize Stranger', -3, 2, 
     )
     getLearRate = HParamControl(
-        root, onSlide, 'Learning Rate', -5, 0, 
+        root, onSlide, 'Learning Rate', -9, -3, 
     )
     def animate_(_):
         animate(
@@ -90,11 +95,15 @@ def HParamControl(
     parent: tk.Tk, slideCallback: tp.Callable[[float], None], 
     text: str, 
     log_from: float, log_to: float, 
+    allow_zero: bool = True, 
 ):
     default = (log_from + log_to) / 2
     var = tk.DoubleVar(value=default)
     def getValue() -> float:
-        return np.exp(var.get())
+        ex = var.get()
+        if allow_zero and abs(ex - log_from) < 1e-6:
+            return 0.0
+        return np.exp(ex)
     
     subroot = tk.Frame(parent)
     subroot.pack()
@@ -122,7 +131,7 @@ def HParamControl(
     scale.pack()
     return getValue
 
-@profileFrequency()
+@profileFrequency(format_str='.0f')
 def animate(
     perc_tole: float, 
     pena_stra: float, 
@@ -144,19 +153,25 @@ def animate(
         trainee_persistent.activations = activations
         f0s = pitch2freq_batch(torch.arange(
             pitch + 1, PIANO_RANGE.stop, 
+            device=device(), 
         ))
         max_n_partials = int(NYQUIST / f0s[0].item())
-        fns = f0s.unsqueeze(1) * torch.arange(
+        fns = f0s.unsqueeze(1) * (torch.arange(
             1, max_n_partials + 1, 
-        ).unsqueeze(0)
-        ans = activations.unsqueeze(1).repeat((1, max_n_partials))
+            device=device(), 
+        ).unsqueeze(0))
+        ans = activations.unsqueeze(1).repeat((
+            1, max_n_partials, 
+        ))
         ans[fns > NYQUIST] = 0.0
-        waves = ((fns * TIME_LADDER).sin() * ans)
+        waves = ((
+            fns.unsqueeze(2) * TIME_LADDER
+        ).sin() * ans.unsqueeze(2))
         mixdown = waves.sum(dim=1).sum(dim=0)
         spectrum: Tensor = torch.fft.rfft(
             mixdown, norm='forward', 
         )
-        line.set_ydata(spectrum.numpy())
+        line.set_ydata(spectrum.cpu().numpy())
 
 def main():
     root, anim = Root()

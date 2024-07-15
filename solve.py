@@ -18,16 +18,6 @@ DEFAULT_LR = 4e-2
 
 FREE_BUT_SMALL = 0.05
 
-# @lru_cache(1)
-# def device():
-#     if torch.cuda.is_available():
-#         return torch.device('cuda')
-#     return torch.device('cpu')
-
-@lru_cache(1)
-def device():
-    return torch.device('cpu')
-
 def getOvertones(pitch: int):
     f0 = pitch2freq(pitch)
     return freq2pitch_batch(torch.arange(
