@@ -3,15 +3,20 @@ import typing as tp
 import numpy as np
 import tkinter as tk
 from matplotlib import pyplot as plt
-from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
 from matplotlib.animation import FuncAnimation
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import torch
+from torch import Tensor
 
+from my import profileFrequency
+
+from shared import *
 from music import *
+from solve import Trainee
 
-PITCHES = [40, 48, 60]
+N_EPOCHS_PER_FRAME = 2
 
 WINDOW_WIDTH = 1000
 SR = 22050
@@ -20,12 +25,13 @@ PAGE_LEN = 1024
 N_FREQ_BINS = PAGE_LEN // 2 + 1
 FREQ_BINS = np.linspace(0, NYQUIST, N_FREQ_BINS)
 
-t_GetValue = tp.Callable[[], float]
+TWO_PI_OVER_SR = 2 * torch.pi / SR
+TIME_LADDER = TWO_PI_OVER_SR * torch.arange(PAGE_LEN).unsqueeze(0).unsqueeze(1).contiguous()
 
 def initFig():
-    fig, axes = plt.subplots(nrows = len(PITCHES), sharex=True)
+    fig, axes = plt.subplots(nrows = len(GUI_PITCHES), sharex=True)
     lines: tp.List[Line2D] = []
-    for ax, pitch in zip(axes, PITCHES):
+    for ax, pitch in zip(axes, GUI_PITCHES):
         ax: Axes
         line, = ax.plot(FREQ_BINS, np.zeros(N_FREQ_BINS))
         lines.append(line)
@@ -49,13 +55,29 @@ def Root():
         fill=tk.BOTH, 
         # expand=True, 
     )
-    getPercTole = HParamControl(root, 'Perception Tolerance', -5, np.log(0.5))
-    getPenaStra = HParamControl(root, 'Penalize Stranger', -3, 2)
+    trainees_persistent = [
+        Trainee(pitch, 0.1, 0.0, 0.0)
+        for pitch in GUI_PITCHES
+    ]
+    def onSlide(_):
+        for trainee in trainees_persistent:
+            trainee.breakFree()
+    getPercTole = HParamControl(
+        root, onSlide, 'Perception Tolerance', -5, np.log(0.5), 
+    )
+    getPenaStra = HParamControl(
+        root, onSlide, 'Penalize Stranger', -3, 2, 
+    )
+    getLearRate = HParamControl(
+        root, onSlide, 'Learning Rate', -5, 0, 
+    )
     def animate_(_):
         animate(
-            getPercTole, 
-            getPenaStra, 
+            getPercTole(), 
+            getPenaStra(), 
+            getLearRate(), 
             lines, 
+            trainees_persistent, 
         )
         return lines
     anim = FuncAnimation(
@@ -65,12 +87,13 @@ def Root():
     return root, anim
 
 def HParamControl(
-    parent: tk.Tk, text: str, 
+    parent: tk.Tk, slideCallback: tp.Callable[[float], None], 
+    text: str, 
     log_from: float, log_to: float, 
 ):
     default = (log_from + log_to) / 2
     var = tk.DoubleVar(value=default)
-    def getValue():
+    def getValue() -> float:
         return np.exp(var.get())
     
     subroot = tk.Frame(parent)
@@ -83,6 +106,10 @@ def HParamControl(
     def updateDisplay(_ = None):
         display.config(text=f'{getValue():.2e}')
     updateDisplay()
+
+    def onSlide(x: str, /):
+        updateDisplay()
+        slideCallback(float(x))
     
     scale = tk.Scale(
         subroot, variable=var, 
@@ -90,17 +117,46 @@ def HParamControl(
         resolution = (log_to - log_from) / 100, 
         showvalue=False, orient='horizontal', 
         length=WINDOW_WIDTH, 
-        command=updateDisplay, 
+        command=onSlide, 
     )
     scale.pack()
     return getValue
 
+@profileFrequency()
 def animate(
-    getPercTole: t_GetValue, 
-    getPenaStra: t_GetValue, 
+    perc_tole: float, 
+    pena_stra: float, 
+    lr: float,
     lines: tp.List[Line2D], 
+    trainees_persistent: tp.List[Trainee], 
 ):
-    ...
+    for line, trainee_persistent, pitch in zip(
+        lines, trainees_persistent, GUI_PITCHES, 
+    ):
+        trainee = Trainee(
+            pitch, perc_tole, pena_stra, lr, 
+            trainee_persistent.activations.detach().clone(), 
+        )
+        for epoch in range(N_EPOCHS_PER_FRAME):
+            loss, _ = trainee.forward()
+            trainee.oneEpochGivenForward(loss)
+        activations = trainee.activations.detach()
+        trainee_persistent.activations = activations
+        f0s = pitch2freq_batch(torch.arange(
+            pitch + 1, PIANO_RANGE.stop, 
+        ))
+        max_n_partials = int(NYQUIST / f0s[0].item())
+        fns = f0s.unsqueeze(1) * torch.arange(
+            1, max_n_partials + 1, 
+        ).unsqueeze(0)
+        ans = activations.unsqueeze(1).repeat((1, max_n_partials))
+        ans[fns > NYQUIST] = 0.0
+        waves = ((fns * TIME_LADDER).sin() * ans)
+        mixdown = waves.sum(dim=1).sum(dim=0)
+        spectrum: Tensor = torch.fft.rfft(
+            mixdown, norm='forward', 
+        )
+        line.set_ydata(spectrum.numpy())
 
 def main():
     root, anim = Root()

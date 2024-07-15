@@ -7,6 +7,7 @@ from torch import Tensor
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
+from shared import *
 from music import *
 from human_freq_response import logFreqResponseDb, HUMAN_RANGE
 from measure_player_piano import MIN_POWER
@@ -33,7 +34,7 @@ def getOvertones(pitch: int):
         f0, HUMAN_RANGE[1], f0, 
     ))
 
-@lru_cache(3)
+@lru_cache(len(GUI_PITCHES))    # don't mutate out tensor
 def discretize(
     target_pitch: int, perception_tolerance: float, 
 ):
@@ -86,9 +87,9 @@ class Trainee:
             self.activations = torch.ones(
                 (len(pitches_above), ), device=device(), 
             ) * FREE_BUT_SMALL
-            self.activations.requires_grad = True
         else:
             self.activations = activations
+        self.activations.requires_grad = True
         self.optim = torch.optim.Adam([self.activations], lr=lr)
 
         if lock_mask is None:
