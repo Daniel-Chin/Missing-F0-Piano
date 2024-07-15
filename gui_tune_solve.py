@@ -96,7 +96,9 @@ def Root(audioStateMachine: AudioStateMachine):
             lines, 
             trainees_persistent, 
         )
-        audioStateMachine.loop(trainees_persistent[GUI_AUDIO_INDEX].activations)
+        audioStateMachine.loop([
+            x.activations for x in trainees_persistent
+        ])
         return lines
     anim = FuncAnimation(
         fig, animate_, 
@@ -227,16 +229,19 @@ class AudioStateMachine:
             self.fs.noteoff(0, pitch)
         self.down_keys.clear()
 
-    def loop(self, activations: Tensor):
+    def loop(self, activationses: tp.List[Tensor]):
         now = int(time())
         if now != self.last_play_time:
-            pitch = GUI_PITCHES[GUI_AUDIO_INDEX]
+            pitch_i = (now % 6) // 2
+            pitch = GUI_PITCHES[pitch_i]
             self.last_play_time = now
             self.panic()
             if now % 2 == 0:
                 self.play(pitch + 12, 127)
             else:
-                velocities = power2velocity(activations.square())
+                velocities = power2velocity(
+                    activationses[pitch_i].square(), 
+                )
                 for p, v in zip(range(
                     pitch + 1, PIANO_RANGE.stop,
                 ), velocities, 
