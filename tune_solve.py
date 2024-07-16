@@ -5,11 +5,11 @@ from disklavier import playMidiOnDisklavier
 from solve import solve
 from missing_f0_midi_writer import MissingF0MidiWriter
 
-PITCH = 40
-PERCEPTION_TOLERANCES = (0.02, )
-PENALIZE_STRANGERSES = (0.0, )
+PITCH = 48
+PERCEPTION_TOLERANCES = (6e-2, )
+PENALIZE_STRANGERSES = (7.4, )
 
-USE_SYNTH_NOT_DISKLAVIER = True
+USE_SYNTH_NOT_DISKLAVIER = False
 
 TEMP_MIDI = 'temp/%d.mid'
 

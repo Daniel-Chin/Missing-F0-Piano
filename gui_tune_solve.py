@@ -1,3 +1,7 @@
+'''
+Does not consider MIN_POWER.  
+'''
+
 from __future__ import annotations
 
 import typing as tp

@@ -137,8 +137,11 @@ def analyze():
     plt.show()
 
 # eyeball result
-# MIN_POWER = 0.019
-MIN_POWER = 1e-6
+
+MIN_POWER = 0.019
+
+# MIN_POWER = 1e-6
+# print('Warning: ablating MIN_POWER')
 
 if __name__ == '__main__':
     print(f'{VELOCITIES = }')
