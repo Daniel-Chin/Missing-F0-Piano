@@ -206,22 +206,27 @@ def solve(
     penalize_strangers: float = DEFAULT_PENALIZE_STRANGERS, 
     lr: float = DEFAULT_LR, 
     verbose: bool = False,
+    show_epoch: bool = False,
 ):
     '''
     `perception_tolerance`: in semitones.  
     `penalize_strangers`: how much to penalize the strangers, i.e., produced undesired frequencies.  
     '''
-    candidates = [Trainee(
+    freshman = Trainee(
         target_pitch, perception_tolerance,
         penalize_strangers, lr, 
-    )]
-    while True:
-        losses = torch.tensor([x.train()[0] for x in candidates])
+    )
+    candidates = [freshman]
+    iter_ = range(freshman.activations.shape[0] + 1)
+    if verbose:
+        iter_ = tqdm(iter_, desc='lock')
+    lock_stats = [0, 0]
+    for _ in iter_:
+        losses = torch.tensor([x.train(show_epoch)[0] for x in candidates])
         winner_i: int = losses.argmin().item()  # type: ignore
         winner = candidates[winner_i]
         assert isinstance(winner, Trainee)  # dumb type checker doesn't take the LFS...
-        if verbose:
-            print('locked', 'down' if winner_i == 0 else 'up')
+        lock_stats[winner_i] += 1
         with torch.no_grad():
             powers = winner.activations.square()
             unlocked = powers + (1.0 - winner.lock_mask) * 69.0
@@ -242,6 +247,10 @@ def solve(
             lock_0  .breakFree()
             lock_min.breakFree()
             candidates = [lock_0, lock_min]
+    else:
+        assert False
+    if verbose:
+        print('locked down', lock_stats[0], ', up', lock_stats[1])
     
     return powers, winner
 
