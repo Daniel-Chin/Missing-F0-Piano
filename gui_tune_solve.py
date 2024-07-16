@@ -239,23 +239,23 @@ class AudioStateMachine:
     def loop(self, activationses: tp.List[Tensor]):
         now = int(time())
         if now != self.last_play_time:
-            pitch_i = (now % 6) // 2
-            pitch_i = 1
-            pitch = GUI_PITCHES[pitch_i]
             self.last_play_time = now
             self.panic()
-            if now % 2 == 0:
-                self.play(pitch + 12, 127)
-            else:
-                velocities = power2velocity(
-                    activationses[pitch_i].square(), 
-                )
-                for p, v in zip(range(
-                    pitch + 1, PIANO_RANGE.stop,
-                ), velocities, 
-                ):
-                    v_: int = v.item()  # type: ignore
-                    self.play(p, v_)
+            phase = (now % (len(GUI_PITCHES) + 1))
+            try:
+                pitch = GUI_PITCHES[phase]
+            except IndexError:
+                self.play(max(GUI_PITCHES) + 12, 127)
+                return
+            velocities = power2velocity(
+                activationses[phase].square(), 
+            )
+            for p, v in zip(range(
+                pitch + 1, PIANO_RANGE.stop,
+            ), velocities, 
+            ):
+                v_: int = v.item()  # type: ignore
+                self.play(p, v_)
 
 if __name__ == '__main__':
     main()
