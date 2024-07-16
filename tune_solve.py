@@ -5,13 +5,13 @@ from disklavier import playMidiOnDisklavier
 from solve import solve
 from missing_f0_midi_writer import MissingF0MidiWriter
 
-PITCH = 48
+PITCH = 52
 PERCEPTION_TOLERANCES = (6e-2, )
 PENALIZE_STRANGERSES = (7.4, )
 
-USE_SYNTH_NOT_DISKLAVIER = False
+USE_SYNTH_NOT_DISKLAVIER = True
 
-TEMP_MIDI = 'temp/%d.mid'
+TEMP_MIDI = 'temp/tune_solve.mid'
 
 def main():
     def experiments():
@@ -32,7 +32,7 @@ def main():
         cursor += 1.0
         writer.add(PITCH, cursor, cursor + 1.0)
         cursor += 2.0
-    writer.midi.write(TEMP_MIDI % 0)
+    writer.midi.write(TEMP_MIDI)
 
     input('Press Enter to play...')
 
@@ -42,11 +42,11 @@ def main():
         print(f'{penalize_strangers = }')
     if USE_SYNTH_NOT_DISKLAVIER:
         with Popen([
-            'synth-midi', TEMP_MIDI % 0, 
+            'synth-midi', TEMP_MIDI, 
         ], stdout=DEVNULL, stderr=DEVNULL) as p:
             p.wait()
     else:
-        playMidiOnDisklavier(TEMP_MIDI % 0, verbose=False)
+        playMidiOnDisklavier(TEMP_MIDI, verbose=False)
 
 if __name__ == '__main__':
     main()
