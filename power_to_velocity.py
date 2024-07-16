@@ -3,6 +3,7 @@ from torch import Tensor
 
 from piecewise_linear import PiecewiseLinear
 
+from shared import *
 from measure_player_piano import MIN_POWER
 
 # results from ./measure_player_piano.py
@@ -23,7 +24,7 @@ MILESTONES = torch.tensor([
 
 piecewiseLinear = PiecewiseLinear(
     MILESTONES[:, 1], MILESTONES[:, 0], 
-)
+).to(device())
 
 def power2velocity(power: Tensor):
     x = piecewiseLinear.forward(power)
