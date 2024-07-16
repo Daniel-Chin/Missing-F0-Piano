@@ -2,7 +2,9 @@ from functools import lru_cache
 
 import torch
 
-GUI_PITCHES = [40, 48, 60]
+# GUI_PITCHES = [41, 48, 60]
+GUI_PITCHES = [48, 50, 52, 53]
+# GUI_PITCHES = [47, 48, ]
 
 @lru_cache(1)
 def device():
