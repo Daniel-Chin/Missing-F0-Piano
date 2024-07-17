@@ -5,7 +5,7 @@ from disklavier import playMidiOnDisklavier
 from solve import solve
 from missing_f0_midi_writer import MissingF0MidiWriter
 
-PITCH = 52
+PITCH = 48
 PERCEPTION_TOLERANCES = (6e-2, )
 PENALIZE_STRANGERSES = (7.4, )
 

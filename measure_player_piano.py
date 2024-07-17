@@ -138,10 +138,14 @@ def analyze():
 
 # eyeball result
 
-# MIN_POWER = 0.019
+MIN_POWER = 0.019
 
-MIN_POWER = 1e-6
-print('Warning: ablating MIN_POWER')
+# MIN_POWER = 1e-6
+# print('Warning: ablating MIN_POWER')
+
+# other result
+# amplitude halves in 2.91 sec
+DECAY = -0.2381
 
 if __name__ == '__main__':
     print(f'{VELOCITIES = }')
